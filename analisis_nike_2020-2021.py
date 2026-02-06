@@ -9,223 +9,290 @@ import streamlit as st
 import folium
 from streamlit_folium import st_folium
 import warnings
+import time
+import io
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 
 # Ignore future warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 # ==========================================
-# 2. KONFIGURASI HALAMAN & DATA
+# FUNGSI HELPER SCRAPING
 # ==========================================
-st.set_page_config(layout="wide")
-st.title("Dashboard Analisis Penjualan Nike - USA")
+def clean_price(text):
+    num = ''.join(c for c in text if c.isdigit())
+    return int(num) if num else 0
 
-# Membaca file CSV
+def auto_scroll(driver, times=4):
+    for _ in range(times):
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(2)
+
+def scrape_nike(max_pages):
+    options = webdriver.ChromeOptions()
+    options.add_argument("--headless")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+
+    driver = webdriver.Chrome(
+        service=Service(ChromeDriverManager().install()),
+        options=options
+    )
+
+    all_products = []
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+
+    for page in range(max_pages):
+        status_text.caption(f"Sedang memproses halaman {page + 1} dari {max_pages}...")
+        url = f"https://www.nike.com/w/mens-shoes-nik1zy7ok?offset={page*24}"
+        driver.get(url)
+
+        time.sleep(4)
+        auto_scroll(driver)
+
+        cards = driver.find_elements(By.CSS_SELECTOR, "div.product-card")
+
+        for card in cards:
+            try:
+                name = card.find_element(By.CSS_SELECTOR, ".product-card__title").text
+                price_text = card.find_element(By.CSS_SELECTOR, ".product-price").text
+                price = clean_price(price_text)
+                link = card.find_element(By.TAG_NAME, "a").get_attribute("href")
+                try:
+                    img = card.find_element(By.TAG_NAME, "img").get_attribute("src")
+                except:
+                    img = ""
+                all_products.append([name, price_text, price, link, img])
+            except:
+                pass
+        
+        progress_bar.progress((page + 1) / max_pages)
+
+    driver.quit()
+    progress_bar.empty()
+    status_text.empty()
+
+    df_res = pd.DataFrame(all_products, columns=["Nama", "Harga Text", "Harga Angka", "Link", "Gambar"])
+    return df_res
+
+# ==========================================
+# KONFIGURASI HALAMAN & DATA LOAD
+# ==========================================
+st.set_page_config(layout="wide", page_title="Nike Analytics Suite")
+st.title("Dashboard Analisis Product Nike")
+
+# Load Data Historis
 try:
     df = pd.read_csv("data_hasil_scrapping.csv")
 except:
-    df = pd.read_csv("dataset keggle/data_hasil_scrapping.csv")
+    try:
+        df = pd.read_csv("dataset keggle/data_hasil_scrapping.csv")
+    except:
+        st.error("File CSV tidak ditemukan.")
+        df = pd.DataFrame()
 
-# Data Cleaning 
-df = df.drop_duplicates()
-df.columns = df.columns.str.strip()
-df['State'] = df['State'].str.strip().str.title()
+# Data Cleaning
+if not df.empty:
+    df = df.drop_duplicates()
+    df.columns = df.columns.str.strip()
+    if 'State' in df.columns:
+        df['State'] = df['State'].str.strip().str.title()
 
-# Perhitungan Kolom IDR
-kurs = 16900
-df["Total Sales IDR"] = df["Total Sales"] * kurs
-df["price per unit IDR"] = df["Price per Unit"] * kurs
+    # Hitung Kurs
+    kurs = 16900
+    if "Total Sales" in df.columns:
+        df["Total Sales IDR"] = df["Total Sales"] * kurs
+    if "Price per Unit" in df.columns:
+        df["price per unit IDR"] = df["Price per Unit"] * kurs
 
-# Membuat kolom kategori berdasarkan Units Sold
-df["kategori"] = df["Units Sold"].apply(
-    lambda x: "Kurang Laku" if x < 50
-    else "Laku" if x <= 80
-    else "Sangat Laku" 
-)
-
-# ==========================================
-# 3. BAGIAN 1: OVERVIEW DATA (TABEL RAPI)
-# ==========================================
-st.subheader("📊 Data Product Nike")
-row, columns = df.shape
-st.write(f'Listings terdiri atas **{row}** baris dan **{columns}** kolom')
-
-# Konfigurasi kolom agar tampil dengan logo mata uang dan titik ribuan
-st.dataframe(
-    df, 
-    use_container_width=True, 
-    column_config={
-        "Invoice Date": st.column_config.DateColumn(format="DD/MM/YYYY"),
-    }
-)
+    # Kategori
+    if "Units Sold" in df.columns:
+        df["kategori"] = df["Units Sold"].apply(
+            lambda x: "Kurang Laku" if x < 50 else "Laku" if x <= 80 else "Sangat Laku" 
+        )
 
 # ==========================================
-# TOP 3 PRODUK BERDASARKAN KATEGORI
-# ==========================================
-st.subheader("🏆 Top 2 Produk Berdasarkan Kategori Penjualan")
-
-col1, col2, col3 = st.columns(3)
-
-produk_total = (
-    df.groupby("Product")["Units Sold"]
-    .sum()
-    .sort_values(ascending=False)
-    .reset_index()
-)
-
-n = len(produk_total)
-bagi = max(1, n // 3)
-
-sangat_laku = produk_total.iloc[:bagi]
-laku = produk_total.iloc[bagi:bagi*2]
-kurang_laku = produk_total.iloc[bagi*2:]
-
-
-with col1:
-    st.markdown("### 🔥 Sangat Laku")
-    st.dataframe(sangat_laku, use_container_width=True)
-
-with col2:
-    st.markdown("### 👍 Laku")
-    st.dataframe(laku, use_container_width=True)
-
-with col3:
-    st.markdown("### ❄️ Kurang Laku")
-    st.dataframe(kurang_laku, use_container_width=True)
-
-# ==========================================
-# 4. BAGIAN 2: ANALISIS PERWILAYAH & METRIK
-# ==========================================
-st.divider() 
-st.subheader("🌎 Analisis Performa Penjualan Berdasarkan Wilayah")
-
-# Grouping data untuk chart
-regional_performance = df.groupby('Region')['Total Sales'].sum().sort_values(ascending=True)
-
-col_chart, col_metric = st.columns([2, 1])
-
-with col_chart:
-    # Perbaikan Chart: Mengatur ukuran agar pas di dalam "kotak" Streamlit
-    fig, ax = plt.subplots(figsize=(8, 5)) 
-    colors = sns.color_palette("viridis", len(regional_performance))
-    regional_performance.plot(kind='barh', color=colors, ax=ax)
-    
-    ax.set_title('Total Sales per Region (USD)', fontsize=12, pad=10)
-    ax.set_xlabel('Total Sales (USD)', fontsize=10)
-    ax.set_ylabel('Region', fontsize=10)
-    
-    # Anotasi angka di ujung bar dengan format ribuan
-    for i, v in enumerate(regional_performance):
-        ax.text(v, i, f' ${v:,.0f}', va='center', fontsize=9)
-    
-    plt.tight_layout() # Memastikan tidak ada label yang terpotong/keluar kotak
-    st.pyplot(fig)
-
-with col_metric:
-    wilayah_tertinggi = regional_performance.idxmax()
-    total_seluruh_usd = df["Total Sales"].sum()
-    total_seluruh_idr = df["Total Sales IDR"].sum()
-    
-    st.metric("Wilayah Penjualan Tertinggi", wilayah_tertinggi)
-    st.metric("Total Penjualan (USD)", f"$ {total_seluruh_usd:,.0f}")
-    st.metric("Total Penjualan (IDR)", f"Rp {total_seluruh_idr:,.0f}")
-    
-    # Menampilkan data mentah hasil grouping
-if st.checkbox("Tampilkan Detail Data Wilayah"):
-    tabel = regional_performance.sort_values(ascending=False).reset_index()
-    tabel.columns = ["Region", "Total Sales"]
-    tabel["Total Sales"] = tabel["Total Sales"].map(lambda x: f"${x:,.0f}")
-    st.dataframe(
-        tabel.style.set_properties(**{
-            'text-align': 'center'
-        })
-    )
-
-# ==========================================
-# 5. BAGIAN 3: PETA GIS (POPUP LENGKAP)
+# BAGIAN 1: LIVE SCRAPER PANEL
 # ==========================================
 st.divider()
-st.subheader("📍 Peta Sebaran: Klik Marker untuk Detail Penjualan")
+st.subheader("🕵️ Live Data Scraper Nike.com")
+st.caption("Ambil data produk terbaru secara real-time.")
 
-# Grouping data per State untuk Map
-state_stats = df.groupby('State').agg({
-    'Units Sold': 'sum',
-    'Total Sales': 'sum'
-}).reset_index()
+with st.expander("Buka Panel Scraping", expanded=False):
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c1:
+        pages_in = st.number_input("Jumlah Halaman", 1, 5, 1)
+    with c2:
+        key_in = st.text_input("Filter Untuk Cari Product")
+    with c3:
+        st.write("")
+        st.write("")
+        btn_start = st.button("🚀 Mulai Scraping", use_container_width=True)
 
-# Titik tengah peta US
-center_lat, center_lon = 37.0902, -95.7129
-m = folium.Map(location=[center_lat, center_lon], zoom_start=4)
-
-# Definisi 5 Wilayah Polygon
-regions = [
-    {"name": "West", "coords": [[49.0, -125.0], [49.0, -111.0], [31.0, -111.0], [31.0, -125.0]], "color": "#90D743", "fill": "#a1c9ed"},
-    {"name": "Southwest", "coords": [[42.0, -111.0], [42.0, -94.0], [25.5, -94.0], [31.0, -111.0]], "color": "#31688E", "fill": "#ffc08a"},
-    {"name": "Midwest", "coords": [[49.0, -111.0], [49.0, -82.0], [37.0, -82.0], [37.0, -111.0]], "color": "#443983", "fill": "#98df8a"},
-    {"name": "Northeast", "coords": [[47.5, -82.0], [47.5, -67.0], [38.0, -67.0], [38.0, -82.0]], "color": "#35B779", "fill": "#c5b0d5"},
-    {"name": "Southeast", "coords": [[37.0, -94.0], [38.0, -75.0], [24.0, -80.0], [24.0, -94.0]], "color": "#21918C", "fill": "#ff9896"}
-]
-
-for reg in regions:
-    folium.Polygon(
-        locations=reg["coords"],
-        color=reg["color"],
-        weight=2,
-        fill=True,
-        fill_color=reg["fill"],
-        fill_opacity=0.2,
-        tooltip=reg["name"]
-    ).add_to(m)
-
-# Koordinat State Dasar
-selected_State_Coords = {
-    "California": [36.7783, -119.4179], "Texas": [31.9686, -99.9018],
-    "New York": [43.2994, -74.2179], "Illinois": [40.6331, -89.3985],
-    "Pennsylvania": [41.2033, -77.1945], "Nevada": [38.8026, -116.4194],
-    "Colorado": [39.5501, -105.7821], "Washington": [47.7511, -120.7401],
-    "Florida": [27.9944, -81.7603], "Minnesota": [46.7296, -94.6859],
-    "Montana": [46.8797, -110.3626], "Tennessee": [35.5175, -86.5804],
-    "Louisiana": [30.9843, -91.9623], "Virginia": [37.4316, -78.6569],
-    "Wyoming": [43.07597, -107.2903], "Oregon": [43.8041, -120.5542],
-    "Utah": [39.3200, -111.0937], "Iowa": [41.8780, -93.0977],
-    "Michigan": [44.1822, -84.5068], "Missouri": [38.5739, -92.6038],
-    "North Dakota": [47.5515, -101.0020], "Indiana": [40.2672, -86.1349],
-    "Wisconsin": [44.5000, -89.5000], "Massachusetts": [42.4072, -71.3824],
-    "New Hampshire": [43.1939, -71.5724], "Vermont": [44.0000, -72.6999],
-    "Connecticut": [41.6032, -73.0877], "Delaware": [38.9108, -75.5277],
-    "Maryland": [39.0458, -76.6413], "Rhode Island": [41.5801, -71.4774],
-    "West Virginia": [38.5976, -80.4549], "New Jersey": [40.0583, -74.4057],
-    "Maine": [45.2538, -69.4455], "Georgia": [32.1656, -82.9001],
-    "Arizona": [34.0489, -111.0937], "Idaho": [44.0682, -114.7420],
-    "New Mexico": [34.5199, -105.8701], "Ohio": [40.4173, -82.9071],
-    "Kansas": [39.0119, -98.4842], "Nebraska": [41.4925, -99.9018],
-    "South Dakota": [43.9695, -99.9018], "Alabama": [32.8067, -86.7911],
-    "Mississippi": [32.3547, -89.3985], "Kentucky": [37.8393, -84.2700],
-    "North Carolina": [35.7596, -79.0193], "South Carolina": [33.8361, -81.1637],
-    "Oklahoma": [35.0078, -97.0929], "Arkansas": [34.9697, -92.3731]
-}
-
-# Tambah Marker
-for index, row_data in state_stats.iterrows():
-    s_name = row_data['State']
-    if s_name in selected_State_Coords:
-        u_sold = row_data['Units Sold']
-        t_rev = row_data['Total Sales']
+    if btn_start:
+        with st.spinner("Sedang scraping..."):
+            df_s = scrape_nike(pages_in)
         
-        popup_html = f"""
-        <div style="font-family: Arial; width: 180px; font-size: 12px;">
-            <h4 style="margin: 0 0 5px 0; color: #d32f2f;">{s_name}</h4>
-            <hr style="margin: 5px 0;">
-            <b>Units Sold:</b> {u_sold:,.0f}<br>
-            <b>Revenue:</b> ${t_rev:,.0f}
-        </div>
-        """
-        
-        folium.Marker(
-            location=selected_State_Coords[s_name],
-            popup=folium.Popup(popup_html, max_width=250),
-            tooltip=s_name,
-            icon=folium.Icon(color="red", icon="shopping-cart", prefix="fa")
-        ).add_to(m)
+        if not df_s.empty:
+            if key_in:
+                df_s = df_s[df_s["Nama"].str.contains(key_in, case=False)]
+            
+            st.success(f"Berhasil mengambil {len(df_s)} produk!")
+            
+            t1, t2, t3 = st.tabs(["📄 Data Tabel", "📊 Grafik Harga", "🖼️ Preview"])
+            
+            with t1:
+                st.dataframe(df_s, use_container_width=True)
+                csv = df_s.to_csv(index=False).encode("utf-8")
+                st.download_button("Download CSV", csv, "nike_live.csv", "text/csv")
+            
+            with t2:
+                fig, ax = plt.subplots()
+                ax.hist(df_s["Harga Angka"], color="orange")
+                st.pyplot(fig)
+            
+            with t3:
+                cols = st.columns(4)
+                for i, r in df_s.head(8).iterrows():
+                    with cols[i%4]:
+                        if r["Gambar"]: st.image(r["Gambar"])
+                        st.caption(f"{r['Nama']} - {r['Harga Text']}")
 
-# Tampilkan Peta
-st_folium(m, width="100%", height=600)
+# ==========================================
+# BAGIAN 2: ANALISIS DATA NIKE KEGGLE.COM
+# ==========================================
+st.divider()
+st.subheader("🧑‍💻 Analisis Data Nike Keggle.com")
+
+with st.expander("Panel Cari Produk", expanded=True):
+    
+    # --- FITUR SEARCH DENGAN BUTTON ---
+    col_input, col_btn = st.columns([3, 1])
+    
+    with col_input:
+        query_historis = st.text_input(
+            "Cari Nama Produk", 
+            placeholder="Masukkan nama produk dari kolom Product...",
+            key="input_search_hist"
+        )
+    
+    with col_btn:
+        st.write("") # Spacer
+        st.write("") 
+        btn_search_hist = st.button("🔍 Cari Produk", use_container_width=True)
+
+    # Inisialisasi DataFrame untuk ditampilkan
+# Inisialisasi DataFrame untuk ditampilkan
+if not df.empty:
+
+    df_display = df.copy()
+
+    # filter kalau ada keyword
+    if query_historis:
+        mask = (
+            df["Product"]
+            .astype(str)
+            .str.lower()
+            .str.contains(query_historis.lower(), na=False)
+        )
+        df_display = df[mask]
+
+        st.info(f"Ditemukan **{len(df_display)}** data untuk kata kunci: '{query_historis}'")
+
+    # =========================
+    # TABS SELALU TAMPIL (LUAR IF)
+    # =========================
+    tab_overview, tab_top, tab_region, tab_map = st.tabs([
+        "📊 Overview Data",
+        "🏆 Top Produk",
+        "🌎 Analisis Wilayah",
+        "📍 Peta Sebaran (GIS)"
+    ])
+
+
+    # 1. Overview
+    with tab_overview:
+            st.write(f"Menampilkan **{df_display.shape[0]}** baris data.")
+            st.dataframe(
+                df_display, 
+                use_container_width=True,
+                column_config={"Invoice Date": st.column_config.DateColumn(format="DD/MM/YYYY")}
+            )
+
+        # 2. Top Produk
+    with tab_top:
+            st.markdown("#### Top Produk Berdasarkan Kategori")
+            produk_total = (
+                df_display.groupby("Product")["Units Sold"]
+                .sum().sort_values(ascending=False).reset_index()
+            )
+            if not produk_total.empty:
+                n = len(produk_total)
+                bagi = max(1, n // 3)
+                c_top1, c_top2, c_top3 = st.columns(3)
+                with c_top1:
+                    st.success("🔥 **Sangat Laku**")
+                    st.dataframe(produk_total.iloc[:bagi], use_container_width=True, hide_index=True)
+                with c_top2:
+                    st.warning("👍 **Laku**")
+                    st.dataframe(produk_total.iloc[bagi:bagi*2], use_container_width=True, hide_index=True)
+                with c_top3:
+                    st.error("❄️ **Kurang Laku**")
+                    st.dataframe(produk_total.iloc[bagi*2:], use_container_width=True, hide_index=True)
+
+        # 3. Analisis Wilayah
+    with tab_region:
+            st.markdown("#### Performa Penjualan Regional")
+            if not df_display.empty:
+                regional_perf = df_display.groupby('Region')['Total Sales'].sum().sort_values(ascending=True)
+                rc1, rc2 = st.columns([2, 1])
+                with rc1:
+                    fig_reg, ax_reg = plt.subplots(figsize=(8, 4))
+                    colors = sns.color_palette("viridis", len(regional_perf))
+                    regional_perf.plot(kind='barh', color=colors, ax=ax_reg)
+                    st.pyplot(fig_reg)
+                with rc2:
+                    st.metric("Total Sales (USD)", f"${df_display['Total Sales'].sum():,.0f}")
+                    st.metric("Total Sales (IDR)", f"Rp {df_display['Total Sales IDR'].sum():,.0f}")
+
+        # 4. Peta GIS
+    with tab_map:
+            st.markdown("#### Peta Sebaran Penjualan")
+            state_stats = df_display.groupby('State').agg({'Units Sold': 'sum', 'Total Sales': 'sum'}).reset_index()
+            m = folium.Map(location=[37.0902, -95.7129], zoom_start=4)
+            
+            selected_State_Coords = {
+                "California": [36.7783, -119.4179], "Texas": [31.9686, -99.9018], "New York": [43.2994, -74.2179], 
+                "Illinois": [40.6331, -89.3985], "Pennsylvania": [41.2033, -77.1945], "Nevada": [38.8026, -116.4194],
+                "Colorado": [39.5501, -105.7821], "Washington": [47.7511, -120.7401], "Florida": [27.9944, -81.7603], 
+                "Minnesota": [46.7296, -94.6859], "Montana": [46.8797, -110.3626], "Tennessee": [35.5175, -86.5804],
+                "Louisiana": [30.9843, -91.9623], "Virginia": [37.4316, -78.6569], "Wyoming": [43.07597, -107.2903], 
+                "Oregon": [43.8041, -120.5542], "Utah": [39.3200, -111.0937], "Iowa": [41.8780, -93.0977],
+                "Michigan": [44.1822, -84.5068], "Missouri": [38.5739, -92.6038], "North Dakota": [47.5515, -101.0020], 
+                "Indiana": [40.2672, -86.1349], "Wisconsin": [44.5000, -89.5000], "Massachusetts": [42.4072, -71.3824],
+                "New Hampshire": [43.1939, -71.5724], "Vermont": [44.0000, -72.6999], "Connecticut": [41.6032, -73.0877], 
+                "Delaware": [38.9108, -75.5277], "Maryland": [39.0458, -76.6413], "Rhode Island": [41.5801, -71.4774],
+                "West Virginia": [38.5976, -80.4549], "New Jersey": [40.0583, -74.4057], "Maine": [45.2538, -69.4455], 
+                "Georgia": [32.1656, -82.9001], "Arizona": [34.0489, -111.0937], "Idaho": [44.0682, -114.7420],
+                "New Mexico": [34.5199, -105.8701], "Ohio": [40.4173, -82.9071], "Kansas": [39.0119, -98.4842], 
+                "Nebraska": [41.4925, -99.9018], "South Dakota": [43.9695, -99.9018], "Alabama": [32.8067, -86.7911],
+                "Mississippi": [32.3547, -89.3985], "Kentucky": [37.8393, -84.2700], "North Carolina": [35.7596, -79.0193], 
+                "South Carolina": [33.8361, -81.1637], "Oklahoma": [35.0078, -97.0929], "Arkansas": [34.9697, -92.3731]
+            }
+
+            for index, row_data in state_stats.iterrows():
+                s_name = row_data['State']
+                if s_name in selected_State_Coords:
+                    folium.Marker(
+                        location=selected_State_Coords[s_name],
+                        popup=f"{s_name}: {row_data['Units Sold']} Sold",
+                        icon=folium.Icon(color="red")
+                    ).add_to(m)
+            st_folium(m, width="100%", height=500)
+else:
+    st.error("Data historis kosong.")
