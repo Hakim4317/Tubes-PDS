@@ -169,7 +169,7 @@ with st.expander("Buka Panel Scrapping", expanded=False):
 st.divider()
 st.subheader("🧑‍💻 Analisis Data Nike Keggle.com")
 
-with st.expander("Panel Cari Produk", expanded=True):
+with st.expander("Panel Cari Produk", expanded=False):
     
     # --- FITUR SEARCH DENGAN BUTTON ---
     col_input, col_btn = st.columns([3, 1])
