@@ -261,7 +261,7 @@ if not df.empty:
                     st.metric("Total Sales (IDR)", f"Rp {df_display['Total Sales IDR'].sum():,.0f}")
 
         # 4. Peta GIS
-    
+
     with tab_map:
 
         st.markdown("#### 📍 Peta Sebaran Penjualan USA")
@@ -288,11 +288,11 @@ if not df.empty:
             # REGION POLYGON (rapih + soft color)
             # ===============================
             regions = [
-                {"name": "West", "coords": [[49,-125],[49,-111],[31,-111],[31,-125]], "color":"#90D743"},
-                {"name": "Midwest", "coords": [[49,-111],[49,-82],[37,-82],[37,-111]], "color":"#443983"},
-                {"name": "Northeast", "coords": [[47.5,-82],[47.5,-67],[38,-67],[38,-82]], "color":"#35B779"},
-                {"name": "Southwest", "coords": [[42,-111],[42,-94],[25.5,-94],[31,-111]], "color":"#31688E"},
-                {"name": "Southeast", "coords": [[37,-94],[38,-75],[24,-80],[24,-94]], "color":"#21918C"},
+                {"name": "West", "coords": [[49,-125],[49,-111],[31,-111],[31,-125]], "color":"#2ecc71"},
+                {"name": "Midwest", "coords": [[49,-111],[49,-82],[37,-82],[37,-111]], "color":"#3498db"},
+                {"name": "Northeast", "coords": [[47.5,-82],[47.5,-67],[38,-67],[38,-82]], "color":"#9b59b6"},
+                {"name": "Southwest", "coords": [[42,-111],[42,-94],[25.5,-94],[31,-111]], "color":"#f39c12"},
+                {"name": "Southeast", "coords": [[37,-94],[38,-75],[24,-80],[24,-94]], "color":"#e74c3c"},
             ]
 
             for reg in regions:
@@ -338,7 +338,7 @@ if not df.empty:
                         width: 190px;
                         font-size: 13px;
                     ">
-                        <h4 style="margin-bottom:6px;color:#d32f2f;">
+                        <h4 style="margin-bottom:6px;color:#e74c3c;">
                             {s_name}
                         </h4>
                         <b>Units Sold:</b> {units:,.0f}<br>
@@ -361,3 +361,4 @@ if not df.empty:
 
         else:
             st.info("Tidak ada data untuk ditampilkan.")
+
