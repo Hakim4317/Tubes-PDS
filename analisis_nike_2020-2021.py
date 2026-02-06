@@ -120,10 +120,10 @@ if not df.empty:
 # BAGIAN 1: LIVE SCRAPER PANEL
 # ==========================================
 st.divider()
-st.subheader("🕵️ Live Data Scraper Nike.com")
+st.subheader("🕵️ Live Data Scrapping Nike.com")
 st.caption("Ambil data produk terbaru secara real-time.")
 
-with st.expander("Buka Panel Scraping", expanded=False):
+with st.expander("Buka Panel Scrapping", expanded=False):
     c1, c2, c3 = st.columns([1, 2, 1])
     with c1:
         pages_in = st.number_input("Jumlah Halaman", 1, 5, 1)
