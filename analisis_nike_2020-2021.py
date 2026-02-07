@@ -11,10 +11,8 @@ from streamlit_folium import st_folium
 import warnings
 import time
 import io
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
+import requests
+from bs4 import BeautifulSoup
 
 # Ignore future warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -32,52 +30,59 @@ def auto_scroll(driver, times=4):
         time.sleep(2)
 
 def scrape_nike(max_pages):
-    options = webdriver.ChromeOptions()
-    options.add_argument("--headless")
-    options.add_argument("--window-size=1920,1080")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-
-    driver = webdriver.Chrome(
-        service=Service(ChromeDriverManager().install()),
-        options=options
-    )
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
 
     all_products = []
     progress_bar = st.progress(0)
     status_text = st.empty()
 
     for page in range(max_pages):
+
         status_text.caption(f"Sedang memproses halaman {page + 1} dari {max_pages}...")
-        url = f"https://www.nike.com/w/mens-shoes-nik1zy7ok?offset={page*24}"
-        driver.get(url)
 
-        time.sleep(4)
-        auto_scroll(driver)
+        offset = page * 24
+        url = f"https://www.nike.com/w/mens-shoes-nik1zy7ok?offset={offset}"
 
-        cards = driver.find_elements(By.CSS_SELECTOR, "div.product-card")
+        try:
+            res = requests.get(url, headers=headers, timeout=10)
+            soup = BeautifulSoup(res.text, "html.parser")
 
-        for card in cards:
-            try:
-                name = card.find_element(By.CSS_SELECTOR, ".product-card__title").text
-                price_text = card.find_element(By.CSS_SELECTOR, ".product-price").text
-                price = clean_price(price_text)
-                link = card.find_element(By.TAG_NAME, "a").get_attribute("href")
+            cards = soup.select("div.product-card")
+
+            for card in cards:
                 try:
-                    img = card.find_element(By.TAG_NAME, "img").get_attribute("src")
-                except:
-                    img = ""
-                all_products.append([name, price_text, price, link, img])
-            except:
-                pass
-        
-        progress_bar.progress((page + 1) / max_pages)
+                    name = card.select_one(".product-card__title").get_text(strip=True)
+                    price_text = card.select_one(".product-price").get_text(strip=True)
+                    price = clean_price(price_text)
 
-    driver.quit()
+                    link = card.select_one("a")["href"]
+                    if not link.startswith("http"):
+                        link = "https://www.nike.com" + link
+
+                    img_tag = card.select_one("img")
+                    img = img_tag["src"] if img_tag else ""
+
+                    all_products.append([name, price_text, price, link, img])
+
+                except:
+                    pass
+
+        except:
+            st.warning(f"Gagal ambil halaman {page+1}")
+
+        progress_bar.progress((page + 1) / max_pages)
+        time.sleep(1)
+
     progress_bar.empty()
     status_text.empty()
 
-    df_res = pd.DataFrame(all_products, columns=["Nama", "Harga Text", "Harga Angka", "Link", "Gambar"])
+    df_res = pd.DataFrame(
+        all_products,
+        columns=["Nama", "Harga Text", "Harga Angka", "Link", "Gambar"]
+    )
+
     return df_res
 
 # ==========================================
