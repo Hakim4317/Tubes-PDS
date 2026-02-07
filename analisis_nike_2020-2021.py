@@ -265,6 +265,25 @@ if not df.empty:
                     st.metric("Total Sales (USD)", f"${df_display['Total Sales'].sum():,.0f}")
                     st.metric("Total Sales (IDR)", f"Rp {df_display['Total Sales IDR'].sum():,.0f}")
 
+            show_table = st.checkbox("📋 Tampilkan tabel detail per wilayah")
+
+            if show_table:
+                regional_table = (
+                df_display
+                .groupby("Region")
+                .agg({
+                    "Units Sold": "sum",
+                    "Total Sales": "sum",
+                    "Total Sales IDR": "sum"
+                })
+                .reset_index()
+                .sort_values("Total Sales", ascending=False)
+            )
+
+                st.dataframe(regional_table, use_container_width=True)
+
+        
+
         # 4. Peta GIS
 
     with tab_map:
