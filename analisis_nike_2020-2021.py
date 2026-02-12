@@ -102,11 +102,13 @@ except:
         df = pd.DataFrame()
 
 # Data Cleaning
+
 if not df.empty:
-    df = df.drop_duplicates()
-    df.columns = df.columns.str.strip()
-    if 'State' in df.columns:
-        df['State'] = df['State'].str.strip().str.title()
+    df["Invoice Date"] = pd.to_datetime(
+        df["Invoice Date"],
+        format="%d-%m-%Y",
+        errors="coerce"
+    )
 
     # Hitung Kurs
     kurs = 16900
